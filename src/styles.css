@@ -1,0 +1,107 @@
+:root {
+  --radius: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: #f6f6f6;
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+#frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+  cursor: grab;
+}
+
+#frame:active {
+  cursor: grabbing;
+}
+
+#cam {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+#status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+
+#status[hidden] {
+  display: none;
+}
+
+#close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 16px;
+  line-height: 24px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, background-color 150ms ease;
+}
+
+#frame:hover #close {
+  opacity: 1;
+}
+
+#close:hover {
+  background: rgba(220, 38, 38, 0.9);
+}
+
+#resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  background: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    rgba(255, 255, 255, 0.7) 55% 62%,
+    transparent 62% 72%,
+    rgba(255, 255, 255, 0.7) 72% 79%,
+    transparent 79%
+  );
+}
+
+#frame:hover #resize-handle {
+  opacity: 1;
+}

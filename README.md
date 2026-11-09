@@ -1,15 +1,27 @@
 # InspirasiCam
 
-Kamera melayang (floating) berbentuk kotak rounded 9:16 untuk macOS — selalu di atas, bisa di-drag dan di-resize dengan rasio terkunci. Cocok untuk presentasi dan screen recording.
+Kamera melayang (floating) berbentuk kotak rounded untuk macOS — selalu di atas, bisa di-drag dan di-resize dengan rasio terkunci. Cocok untuk presentasi dan screen recording.
 
-## Fitur v1
-- Video kamera default sistem, tanpa border, sudut rounded 12px
+## Fitur
+- Video kamera tanpa border, sudut rounded 12px
+- Preset rasio: 16:9 Landscape, 9:16 Portrait, 1:1 Square, 4:3 Classic (luas area & titik tengah dipertahankan saat ganti)
+- Pilih kamera (built-in, webcam USB, iPhone Continuity Camera); daftar ter-update otomatis saat kamera dicolok/dicabut
 - Drag di mana saja untuk memindahkan
-- Resize dari handle pojok kanan bawah (atau tepi window), rasio 9:16 terkunci
+- Resize dari handle pojok kanan bawah (atau tepi window), rasio terkunci
 - Always on top, termasuk di atas app fullscreen dan di semua Spaces
-- Tanpa icon Dock
-- Posisi & ukuran diingat
-- Hover → tombol × untuk keluar (juga Cmd+Q / Cmd+W)
+- Tanpa icon Dock — dikontrol dari icon menu bar
+- Rasio, kamera, posisi & ukuran diingat
+- Hover → gradien halus + tombol × untuk keluar (juga Cmd+Q / Cmd+W)
+
+## Menu Bar
+| Item | Fungsi |
+|---|---|
+| InspirasiCam vX.Y.Z | Versi app |
+| Sembunyikan / Tampilkan Overlay | Sembunyikan kamera tanpa menutup app (kamera dimatikan) |
+| Rasio ▸ | Ganti preset rasio |
+| Kamera ▸ | Pilih kamera |
+| Reset Posisi & Ukuran | Kembali ke tengah layar dengan ukuran default |
+| Keluar | Tutup app |
 
 ## Kebutuhan
 - macOS 12 (Monterey) atau lebih baru

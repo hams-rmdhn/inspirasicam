@@ -1,6 +1,6 @@
 [package]
 name = "inspirasicam"
-version = "0.1.0"
+version = "0.2.0"
 description = "InspirasiCam - floating rectangle camera overlay"
 authors = ["you"]
 edition = "2024"
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "InspirasiCam",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.inspirasicam.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -18,8 +18,6 @@
         "title": "InspirasiCam",
         "width": 270,
         "height": 480,
-        "minWidth": 135,
-        "minHeight": 240,
         "decorations": false,
         "transparent": true,
         "shadow": false,

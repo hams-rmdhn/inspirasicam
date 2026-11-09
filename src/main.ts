@@ -1,7 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
-const ASPECT = 16 / 9;
-const MIN_WIDTH = 135;
+type Settings = { ratio: [number, number]; cameraId: string | null };
+
+const MIN_SHORT_SIDE = 135;
 
 const appWindow = getCurrentWindow();
 const frame = document.querySelector<HTMLDivElement>("#frame")!;
@@ -11,19 +14,55 @@ const closeBtn = document.querySelector<HTMLButtonElement>("#close")!;
 const resizeHandle = document.querySelector<HTMLDivElement>("#resize-handle")!;
 
 let stream: MediaStream | null = null;
+let ratio: [number, number] = [9, 16];
+let desiredCameraId: string | null = null;
+let currentCameraId: string | null = null;
+let cameraQueue: Promise<void> = Promise.resolve();
 
 function showStatus(message: string) {
   statusEl.textContent = message;
   statusEl.hidden = false;
 }
 
-async function startCamera() {
+function errorName(error: unknown) {
+  return (error as { name?: string } | null)?.name ?? "";
+}
+
+function stopCamera() {
+  stream?.getTracks().forEach((track) => track.stop());
+  stream = null;
+  video.srcObject = null;
+}
+
+async function openStream(deviceId: string | null) {
+  if (deviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } }, audio: false });
+    } catch (error) {
+      if (!["OverconstrainedError", "NotFoundError", "NotReadableError"].includes(errorName(error))) throw error;
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+}
+
+async function syncCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices
+    .filter((device) => device.kind === "videoinput")
+    .map((device) => ({ id: device.deviceId, label: device.label }));
+  await invoke("set_cameras", { cameras, selected: currentCameraId });
+}
+
+async function startCamera(deviceId: string | null) {
+  stopCamera();
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    stream = await openStream(deviceId);
     video.srcObject = stream;
     statusEl.hidden = true;
+    currentCameraId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? null;
+    await syncCameras();
   } catch (error) {
-    const name = error instanceof DOMException ? error.name : "";
+    const name = errorName(error);
     if (name === "NotAllowedError") {
       showStatus("Akses kamera ditolak. Izinkan di System Preferences › Security & Privacy › Camera, lalu buka ulang app.");
     } else if (name === "NotFoundError") {
@@ -34,8 +73,12 @@ async function startCamera() {
   }
 }
 
+function queueCamera(action: () => Promise<void> | void) {
+  cameraQueue = cameraQueue.then(action, action);
+}
+
 async function quit() {
-  stream?.getTracks().forEach((track) => track.stop());
+  stopCamera();
   await appWindow.close();
 }
 
@@ -61,6 +104,9 @@ resizeHandle.addEventListener("pointerdown", (event) => {
   event.stopPropagation();
   resizeHandle.setPointerCapture(event.pointerId);
 
+  const [rw, rh] = ratio;
+  const aspect = rh / rw;
+  const minWidth = MIN_SHORT_SIDE * Math.max(1, rw / rh);
   const startX = event.screenX;
   const startY = event.screenY;
   const startWidth = window.innerWidth;
@@ -69,12 +115,12 @@ resizeHandle.addEventListener("pointerdown", (event) => {
 
   const onMove = (move: PointerEvent) => {
     const dx = move.screenX - startX;
-    const dy = (move.screenY - startY) / ASPECT;
-    nextWidth = Math.max(MIN_WIDTH, Math.round(startWidth + Math.max(dx, dy)));
+    const dy = (move.screenY - startY) / aspect;
+    nextWidth = Math.max(minWidth, Math.round(startWidth + Math.max(dx, dy)));
     if (pending !== null) return;
     pending = requestAnimationFrame(() => {
       pending = null;
-      appWindow.setSize(new LogicalSize(nextWidth, Math.round(nextWidth * ASPECT)));
+      appWindow.setSize(new LogicalSize(nextWidth, Math.round(nextWidth * aspect)));
     });
   };
 
@@ -90,4 +136,30 @@ resizeHandle.addEventListener("pointerdown", (event) => {
   resizeHandle.addEventListener("pointercancel", onUp);
 });
 
-startCamera();
+navigator.mediaDevices.addEventListener("devicechange", () => {
+  queueCamera(() => {
+    if (!stream) return;
+    const ended = stream.getVideoTracks().every((track) => track.readyState === "ended");
+    return ended ? startCamera(desiredCameraId) : syncCameras();
+  });
+});
+
+async function init() {
+  await listen<[number, number]>("ratio-changed", (event) => {
+    ratio = event.payload;
+  });
+  await listen<string>("select-camera", (event) => {
+    desiredCameraId = event.payload;
+    queueCamera(() => startCamera(desiredCameraId));
+  });
+  await listen<boolean>("overlay-visibility", (event) => {
+    queueCamera(() => (event.payload ? startCamera(desiredCameraId) : stopCamera()));
+  });
+
+  const settings = await invoke<Settings>("get_settings");
+  ratio = settings.ratio;
+  desiredCameraId = settings.cameraId;
+  queueCamera(() => startCamera(desiredCameraId));
+}
+
+init();

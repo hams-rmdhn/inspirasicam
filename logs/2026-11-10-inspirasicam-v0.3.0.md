@@ -9,7 +9,7 @@ Menambahkan perekaman video ke mp4 di folder Movies: indikator REC dengan timer,
 - `src-tauri/src/settings.rs`: `mic_id` di Settings.
 - `src/main.ts`: `MediaRecorder` merekam video track mentah + audio mic via `AudioContext`→`MediaStreamDestination`; chunk → `recording_append`; setelah stop → `crop_recording`; ganti mic saat rekam; toast status; indikator REC.
 - `index.html`/`src/styles.css`: elemen `#rec` (dot + timer), `#toast`.
-- `src-tauri/Entitlements.plist` + `Info.plist`: entitlement + usage description mikrofon.
+- `src-tauri/Entitlements.plist` + `Info.plist`: entitlement `com.apple.security.device.audio-input` + `NSMicrophoneUsageDescription`. Catatan: key yang benar adalah `audio-input` — `com.apple.security.device.microphone` tidak valid dan menyebabkan TCC kill app (force close) saat meminta akses mic pada build hardened runtime.
 - `Cargo.toml`: `objc2-av-foundation`, `objc2-core-media`, `objc2-core-foundation`, `block2`, `tauri-plugin-notification`; versi 0.3.0.
 
 ## Verifikasi

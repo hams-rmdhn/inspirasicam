@@ -17,14 +17,15 @@
 
 ## Arsitektur
 - Frontend vanilla TS: `index.html`, `src/main.ts`, `src/styles.css`.
-- Rust: `src-tauri/src/lib.rs` + `src-tauri/src/settings.rs`
+- Rust: `src-tauri/src/lib.rs` + `src-tauri/src/settings.rs` + `src-tauri/src/recording.rs`
   - `ActivationPolicy::Accessory` → tanpa Dock icon (plus `LSUIElement` di `Info.plist`).
   - `configure_overlay()` (objc2-app-kit): collection behavior `CanJoinAllSpaces | FullScreenAuxiliary | Stationary`, level `NSStatusWindowLevel`.
   - `fit_window()` = satu-satunya tempat mengatur ukuran sesuai rasio: min size, `setContentAspectRatio`, ukuran dari luas area, opsional pertahankan titik tengah.
   - `tauri-plugin-window-state` (SIZE | POSITION) di-restore manual di `setup`, lalu `fit_window`.
-  - Menu bar (`build_tray`, `handle_menu`): ID item `ratio:<id>`, `camera:<deviceId>`, `toggle`, `reset`, `quit`.
-  - Settings (`ratio`, `cameraId`) disimpan di `app_config_dir()/settings.json`.
-- Alur data: Rust = sumber kebenaran rasio/menu/settings. JS memanggil `get_settings` saat start dan `set_cameras` (daftar dari `enumerateDevices`) untuk mengisi submenu Kamera. Rust mengirim event `ratio-changed`, `select-camera`, `overlay-visibility` ke webview.
+  - Menu bar (`build_tray`, `handle_menu`): ID item `ratio:<id>`, `camera:<deviceId>`, `mic:<deviceId|default>`, `record`, `toggle`, `reset`, `quit`.
+  - Settings (`ratio`, `cameraId`, `micId`) disimpan di `app_config_dir()/settings.json`.
+- Alur data: Rust = sumber kebenaran rasio/menu/settings. JS memanggil `get_settings` saat start dan `set_devices` (daftar dari `enumerateDevices`) untuk mengisi submenu Kamera & Mikrofon. Rust mengirim event `ratio-changed`, `select-camera`, `select-mic`, `overlay-visibility`, `recording-toggle`, `request-quit` ke webview.
+- Rekaman (`recording.rs`): `MediaRecorder` di JS merekam video track kamera mentah + audio mic (via `AudioContext`→`MediaStreamDestination`); chunk → `recording_append` menulis `~/Movies/Rekaman-<timestamp>.mp4`. Setelah `recording_stop`, `crop_recording` melakukan center-crop ke rasio aktif via `AVMutableVideoComposition` + `AVAssetExportSession` lalu rename atomik timpa file asli. JANGAN pakai `canvas.captureStream` — menghasilkan frame hitam di WebKit Monterey.
 - Definisi rasio hanya di `settings.rs` (`Ratio`); JS menerima `[w, h]` lewat `get_settings`/`ratio-changed`.
 - Tauri tidak punya API lock aspect ratio (tauri#5332) → native di Rust + handle resize JS (`#resize-handle`) yang menjaga rasio via `setSize`.
 - `startResizeDragging` tidak didukung di macOS, jangan dipakai.

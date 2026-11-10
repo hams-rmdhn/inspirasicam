@@ -4,6 +4,8 @@
 <dict>
   <key>NSCameraUsageDescription</key>
   <string>InspirasiCam membutuhkan akses kamera untuk menampilkan video Anda.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>InspirasiCam membutuhkan akses mikrofon untuk merekam suara Anda.</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

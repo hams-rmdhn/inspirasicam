@@ -1,8 +1,10 @@
+mod recording;
 mod settings;
 
+use recording::Recording;
 use serde::{Deserialize, Serialize};
 use settings::{Ratio, Settings};
-use std::sync::Mutex;
+use std::{sync::Mutex, thread, time::Duration};
 use tauri::{
     image::Image,
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
@@ -16,9 +18,25 @@ const DEFAULT_AREA: f64 = 270.0 * 480.0;
 
 struct AppState {
     settings: Mutex<Settings>,
+    recording: Mutex<Option<Recording>>,
     ratio_items: Vec<(Ratio, CheckMenuItem<Wry>)>,
     camera_menu: Submenu<Wry>,
+    mic_menu: Submenu<Wry>,
     toggle_item: MenuItem<Wry>,
+    record_item: MenuItem<Wry>,
+}
+
+impl AppState {
+    fn set_recording_menu(&self, recording: bool) -> tauri::Result<()> {
+        self.record_item
+            .set_text(if recording { "Berhenti Rekam" } else { "Mulai Rekam" })?;
+        self.toggle_item.set_enabled(!recording)?;
+        // The recorded canvas size is fixed when recording starts, so ratio and camera stay locked.
+        for (_, item) in &self.ratio_items {
+            item.set_enabled(!recording)?;
+        }
+        self.camera_menu.set_enabled(!recording)
+    }
 }
 
 #[derive(Serialize)]
@@ -26,10 +44,11 @@ struct AppState {
 struct SettingsPayload {
     ratio: [f64; 2],
     camera_id: Option<String>,
+    mic_id: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct CameraInfo {
+struct DeviceInfo {
     id: String,
     label: String,
 }
@@ -118,33 +137,49 @@ fn get_settings(state: State<AppState>) -> SettingsPayload {
     SettingsPayload {
         ratio: [rw, rh],
         camera_id: settings.camera_id.clone(),
+        mic_id: settings.mic_id.clone(),
     }
 }
 
+/// Rebuilds the "Kamera" (`kind = "camera"`) or "Mikrofon" (`kind = "mic"`) submenu.
 #[tauri::command]
-fn set_cameras(
+fn set_devices(
     app: AppHandle,
     state: State<AppState>,
-    cameras: Vec<CameraInfo>,
+    kind: String,
+    devices: Vec<DeviceInfo>,
     selected: Option<String>,
 ) -> tauri::Result<()> {
-    let menu = &state.camera_menu;
+    let is_mic = kind == "mic";
+    let (menu, fallback_label) = if is_mic {
+        (&state.mic_menu, "Mikrofon")
+    } else {
+        (&state.camera_menu, "Kamera")
+    };
     while menu.remove_at(0)?.is_some() {}
 
-    if cameras.is_empty() {
+    if is_mic {
+        // WebKit hides microphone devices until mic permission is granted, so an
+        // empty list only shows the default entry instead of "no microphone".
+        let item = CheckMenuItem::with_id(&app, "mic:default", "Default Sistem", true, selected.is_none(), None::<&str>)?;
+        menu.append(&item)?;
+        if !devices.is_empty() {
+            menu.append(&PredefinedMenuItem::separator(&app)?)?;
+        }
+    } else if devices.is_empty() {
         menu.append(&MenuItem::with_id(&app, "camera-none", "Tidak ada kamera", false, None::<&str>)?)?;
     }
-    for (index, camera) in cameras.iter().enumerate() {
-        let label = match camera.label.trim() {
-            "" => format!("Kamera {}", index + 1),
+    for (index, device) in devices.iter().enumerate() {
+        let label = match device.label.trim() {
+            "" => format!("{fallback_label} {}", index + 1),
             label => label.to_string(),
         };
-        let checked = selected.as_deref() == Some(camera.id.as_str());
-        let item = CheckMenuItem::with_id(&app, format!("camera:{}", camera.id), label, true, checked, None::<&str>)?;
+        let checked = selected.as_deref() == Some(device.id.as_str());
+        let item = CheckMenuItem::with_id(&app, format!("{kind}:{}", device.id), label, true, checked, None::<&str>)?;
         menu.append(&item)?;
     }
 
-    if let Some(selected) = selected {
+    if !is_mic && let Some(selected) = selected {
         let mut settings = state.settings.lock().unwrap();
         if settings.camera_id.as_deref() != Some(selected.as_str()) {
             settings.camera_id = Some(selected);
@@ -152,6 +187,20 @@ fn set_cameras(
         }
     }
     Ok(())
+}
+
+fn check_only(menu: &Submenu<Wry>, id: &str) -> tauri::Result<()> {
+    for item in menu.items()? {
+        if let Some(check) = item.as_check_menuitem() {
+            check.set_checked(check.id().0 == id)?;
+        }
+    }
+    Ok(())
+}
+
+fn quit(app: &AppHandle) {
+    let _ = app.save_window_state(window_flags());
+    app.exit(0);
 }
 
 fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
@@ -172,19 +221,25 @@ fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
         let (rw, rh) = ratio.dims();
         window.emit("ratio-changed", [rw, rh])?;
     } else if let Some(camera_id) = id.strip_prefix("camera:") {
-        for item in state.camera_menu.items()? {
-            if let Some(check) = item.as_check_menuitem() {
-                check.set_checked(check.id().0 == id)?;
-            }
-        }
+        check_only(&state.camera_menu, id)?;
         {
             let mut settings = state.settings.lock().unwrap();
             settings.camera_id = Some(camera_id.to_string());
             settings.save(app);
         }
         window.emit("select-camera", camera_id)?;
+    } else if let Some(mic_id) = id.strip_prefix("mic:") {
+        check_only(&state.mic_menu, id)?;
+        let mic_id = (mic_id != "default").then(|| mic_id.to_string());
+        {
+            let mut settings = state.settings.lock().unwrap();
+            settings.mic_id = mic_id.clone();
+            settings.save(app);
+        }
+        window.emit("select-mic", mic_id)?;
     } else {
         match id {
+            "record" => window.emit("recording-toggle", ())?,
             "toggle" => {
                 let visible = window.is_visible()?;
                 if visible {
@@ -200,10 +255,15 @@ fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
                 fit_window(&window, ratio, Some(DEFAULT_AREA), false)?;
                 window.center()?;
             }
-            "quit" => {
-                let _ = app.save_window_state(window_flags());
-                app.exit(0);
+            "quit" if recording::is_recording(&state) => {
+                window.emit("request-quit", ())?;
+                let app = app.clone();
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_secs(5));
+                    quit(&app);
+                });
             }
+            "quit" => quit(app),
             _ => {}
         }
     }
@@ -213,6 +273,7 @@ fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
 fn build_tray(app: &tauri::App, ratio: Ratio) -> tauri::Result<AppState> {
     let version = app.package_info().version.to_string();
     let about = MenuItem::with_id(app, "about", format!("InspirasiCam v{version}"), false, None::<&str>)?;
+    let record_item = MenuItem::with_id(app, "record", "Mulai Rekam", true, None::<&str>)?;
     let toggle_item = MenuItem::with_id(app, "toggle", "Sembunyikan Overlay", true, None::<&str>)?;
 
     let ratio_menu = Submenu::with_id(app, "ratio", "Rasio", true)?;
@@ -232,6 +293,8 @@ fn build_tray(app: &tauri::App, ratio: Ratio) -> tauri::Result<AppState> {
 
     let camera_menu = Submenu::with_id(app, "camera", "Kamera", true)?;
     camera_menu.append(&MenuItem::with_id(app, "camera-loading", "Memuat kamera…", false, None::<&str>)?)?;
+    let mic_menu = Submenu::with_id(app, "mic", "Mikrofon", true)?;
+    mic_menu.append(&MenuItem::with_id(app, "mic-loading", "Memuat mikrofon…", false, None::<&str>)?)?;
 
     let reset = MenuItem::with_id(app, "reset", "Reset Posisi & Ukuran", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Keluar", true, Some("CmdOrCtrl+Q"))?;
@@ -241,9 +304,12 @@ fn build_tray(app: &tauri::App, ratio: Ratio) -> tauri::Result<AppState> {
         &[
             &about,
             &PredefinedMenuItem::separator(app)?,
+            &record_item,
+            &PredefinedMenuItem::separator(app)?,
             &toggle_item,
             &ratio_menu,
             &camera_menu,
+            &mic_menu,
             &reset,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -265,9 +331,12 @@ fn build_tray(app: &tauri::App, ratio: Ratio) -> tauri::Result<AppState> {
 
     Ok(AppState {
         settings: Mutex::new(Settings::default()),
+        recording: Mutex::new(None),
         ratio_items,
         camera_menu,
+        mic_menu,
         toggle_item,
+        record_item,
     })
 }
 
@@ -280,7 +349,16 @@ pub fn run() {
                 .skip_initial_state("main")
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![get_settings, set_cameras])
+        .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![
+            get_settings,
+            set_devices,
+            recording::recording_start,
+            recording::recording_append,
+            recording::recording_stop,
+            recording::crop_recording,
+            recording::recording_error,
+        ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);

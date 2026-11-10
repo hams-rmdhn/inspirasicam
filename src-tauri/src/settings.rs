@@ -55,6 +55,7 @@ impl Ratio {
 pub struct Settings {
     pub ratio: Ratio,
     pub camera_id: Option<String>,
+    pub mic_id: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {

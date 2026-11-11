@@ -1,6 +1,6 @@
 [package]
 name = "inspirasicam"
-version = "0.3.0"
+version = "0.3.1"
 description = "InspirasiCam - floating rectangle camera overlay"
 authors = ["you"]
 edition = "2024"

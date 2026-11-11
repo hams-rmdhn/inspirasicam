@@ -10,8 +10,8 @@
 - Typecheck frontend: `npx tsc --noEmit`
 - Cek Rust: `cd src-tauri && cargo check`
 - Build release: `npm run tauri build` → `.app` + `.dmg` di `src-tauri/target/release/bundle/`
-- Regenerate icon app: `npx tauri icon app-icon.svg`
-- Regenerate icon menu bar: `npx tauri icon tray-icon.svg -o /tmp/trayicon --png 44 && cp /tmp/trayicon/44x44.png src-tauri/icons/tray.png`
+- Regenerate icon app: `npx tauri icon app-icon.png`
+- Regenerate icon menu bar: `npx tauri icon app-icon.png -o /tmp/trayicon --png 44 && cp /tmp/trayicon/44x44.png src-tauri/icons/tray.png`
 - Release: `gh release create vX.Y.Z src-tauri/target/release/bundle/dmg/InspirasiCam_X.Y.Z_x64.dmg` (gh ada di `~/.local/bin/gh`)
 - Versi harus di-bump di 3 tempat: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`.
 

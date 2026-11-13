@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "InspirasiCam",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "identifier": "com.inspirasicam.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

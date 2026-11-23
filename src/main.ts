@@ -290,6 +290,10 @@ frame.addEventListener("mousedown", (event) => {
 closeBtn.addEventListener("click", quit);
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    invoke("exit_fullscreen").catch(console.error);
+    return;
+  }
   if (event.metaKey && (event.key === "q" || event.key === "w")) {
     event.preventDefault();
     quit();
@@ -364,6 +368,9 @@ async function init() {
   });
   await listen("recording-toggle", () => {
     queueCamera(() => (session ? stopRecording() : startRecording()));
+  });
+  await listen<boolean>("fullscreen-changed", (event) => {
+    frame.classList.toggle("fullscreen", event.payload);
   });
   await listen("request-quit", quit);
 

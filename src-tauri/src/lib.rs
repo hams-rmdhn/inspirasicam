@@ -16,6 +16,11 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
 const MIN_SHORT_SIDE: f64 = 135.0;
 const DEFAULT_AREA: f64 = 270.0 * 480.0;
 
+/// The window's style mask before entering fullscreen, so it can be restored on
+/// exit (a temporary titled mask is needed for `toggleFullScreen` to work).
+#[cfg(target_os = "macos")]
+static SAVED_MASK: Mutex<Option<objc2_app_kit::NSWindowStyleMask>> = Mutex::new(None);
+
 struct AppState {
     settings: Mutex<Settings>,
     recording: Mutex<Option<Recording>>,
@@ -87,19 +92,143 @@ fn apply_native_aspect(window: &WebviewWindow, ratio: Ratio) -> tauri::Result<()
 }
 
 #[cfg(target_os = "macos")]
+fn set_collection_behavior(
+    window: &WebviewWindow,
+    behavior: objc2_app_kit::NSWindowCollectionBehavior,
+) -> tauri::Result<()> {
+    use objc2_app_kit::NSWindow;
+
+    // SAFETY: called from the setup hook, menu/shortcut handlers, and
+    // run_on_main_thread closures, all on the macOS main thread; the pointer
+    // refers to Tauri's live NSWindow.
+    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+    ns_window.setCollectionBehavior(behavior);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn configure_overlay(window: &WebviewWindow) -> tauri::Result<()> {
     use objc2_app_kit::{NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
-    // SAFETY: called from the setup hook, which runs on the macOS main thread,
-    // and the pointer refers to Tauri's live NSWindow for this window.
-    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
-    ns_window.setCollectionBehavior(
+    set_collection_behavior(
+        window,
         NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::Stationary,
-    );
+    )?;
+    // SAFETY: called from the setup hook and run_on_main_thread closures, which
+    // run on the macOS main thread; the pointer refers to Tauri's live NSWindow.
+    let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
     ns_window.setLevel(NSStatusWindowLevel);
     Ok(())
+}
+
+/// Toggles native macOS fullscreen. `toggleFullScreen` forces the window level
+/// back to normal and requires `FullScreenPrimary` while fullscreen, so the
+/// overlay's own level, collection behavior and aspect lock are swapped out on
+/// entry and restored once the exit transition finishes.
+fn toggle_fullscreen(app: &AppHandle, window: &WebviewWindow, enter: bool) -> tauri::Result<()> {
+    if enter {
+        if !window.is_visible()? {
+            window.show()?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_app_kit::{
+                NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask,
+                NSWindowTitleVisibility,
+            };
+            use objc2_foundation::NSSize;
+
+            set_collection_behavior(window, NSWindowCollectionBehavior::FullScreenPrimary)?;
+            // SAFETY: called from menu/shortcut handlers on the main thread.
+            let ns_window = unsafe { &*(window.ns_window()? as *mut NSWindow) };
+            // The aspect constraint must be removed before the style mask
+            // changes: AppKit adjusts the frame for the new title bar and a
+            // conflicting contentAspectRatio can produce an invalid rect.
+            ns_window.setContentAspectRatio(NSSize::new(0.0, 0.0));
+            // tao swaps a borderless window to a temporary titled mask inside
+            // `set_fullscreen`, which shows a visible "InspirasiCam" title bar
+            // while fullscreen and re-renders the window mid-transition. Give
+            // the window a fullscreen-ready mask with an invisible title bar
+            // upfront so that swap is skipped entirely.
+            let mut saved = SAVED_MASK.lock().unwrap();
+            if saved.is_none() {
+                *saved = Some(ns_window.styleMask());
+            }
+            drop(saved);
+            ns_window.setStyleMask(
+                NSWindowStyleMask::Titled
+                    | NSWindowStyleMask::Resizable
+                    | NSWindowStyleMask::Miniaturizable
+                    | NSWindowStyleMask::FullSizeContentView,
+            );
+            ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+            ns_window.setTitlebarAppearsTransparent(true);
+            for button in [
+                NSWindowButton::CloseButton,
+                NSWindowButton::MiniaturizeButton,
+                NSWindowButton::ZoomButton,
+            ] {
+                if let Some(button) = ns_window.standardWindowButton(button) {
+                    button.setHidden(true);
+                }
+            }
+        }
+    }
+    window.set_fullscreen(enter)?;
+
+    let app = app.clone();
+    let window = window.clone();
+    thread::spawn(move || {
+        // Wait for the animated transition to settle (max ~5s), then restore.
+        for _ in 0..50 {
+            if window.is_fullscreen().unwrap_or(!enter) == enter {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        if !enter {
+            // `windowDidExitFullScreen:` fires while the window is still moving
+            // back to its original space; give it a moment so mask/frame
+            // changes don't hit an in-flight transition.
+            thread::sleep(Duration::from_millis(500));
+        }
+        let _ = app.run_on_main_thread(move || {
+            if !enter {
+                #[cfg(target_os = "macos")]
+                {
+                    use objc2_app_kit::{NSWindow, NSWindowTitleVisibility};
+
+                    // Level and collection behavior first (no frame changes),
+                    // then the mask: AppKit adjusts the frame internally when
+                    // the style mask changes, so the window must be settled.
+                    let _ = configure_overlay(&window);
+                    if let (Some(mask), Ok(ptr)) = (SAVED_MASK.lock().unwrap().take(), window.ns_window()) {
+                        // SAFETY: runs on the macOS main thread.
+                        let ns_window = unsafe { &*(ptr as *mut NSWindow) };
+                        ns_window.setStyleMask(mask);
+                        ns_window.setTitleVisibility(NSWindowTitleVisibility::Visible);
+                        ns_window.setTitlebarAppearsTransparent(false);
+                    }
+                }
+                let state = window.state::<AppState>();
+                let ratio = state.settings.lock().unwrap().ratio;
+                let _ = fit_window(&window, ratio, None, false);
+            }
+            let _ = window.emit("fullscreen-changed", enter);
+        });
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn exit_fullscreen(app: AppHandle, window: WebviewWindow) -> tauri::Result<()> {
+    if window.is_fullscreen()? {
+        toggle_fullscreen(&app, &window, false)
+    } else {
+        Ok(())
+    }
 }
 
 /// Resizes the window to `ratio` with roughly `area` logical pixels, optionally keeping its center.
@@ -217,7 +346,11 @@ fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
             settings.ratio = ratio;
             settings.save(app);
         }
-        fit_window(&window, ratio, None, true)?;
+        // While fullscreen the size is fixed by the screen; the new ratio is
+        // applied on exit via the restore step in toggle_fullscreen.
+        if !window.is_fullscreen().unwrap_or(false) {
+            fit_window(&window, ratio, None, true)?;
+        }
         let (rw, rh) = ratio.dims();
         window.emit("ratio-changed", [rw, rh])?;
     } else if let Some(camera_id) = id.strip_prefix("camera:") {
@@ -240,6 +373,10 @@ fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
     } else {
         match id {
             "record" => window.emit("recording-toggle", ())?,
+            "fullscreen" => {
+                let enter = !window.is_fullscreen()?;
+                toggle_fullscreen(app, &window, enter)?;
+            }
             "toggle" => {
                 let visible = window.is_visible()?;
                 if visible {
@@ -251,9 +388,11 @@ fn handle_menu(app: &AppHandle, event: &MenuEvent) -> tauri::Result<()> {
                 window.emit("overlay-visibility", !visible)?;
             }
             "reset" => {
-                let ratio = state.settings.lock().unwrap().ratio;
-                fit_window(&window, ratio, Some(DEFAULT_AREA), false)?;
-                window.center()?;
+                if !window.is_fullscreen().unwrap_or(false) {
+                    let ratio = state.settings.lock().unwrap().ratio;
+                    fit_window(&window, ratio, Some(DEFAULT_AREA), false)?;
+                    window.center()?;
+                }
             }
             "quit" if recording::is_recording(&state) => {
                 window.emit("request-quit", ())?;
@@ -275,6 +414,9 @@ fn build_tray(app: &tauri::App, ratio: Ratio) -> tauri::Result<AppState> {
     let about = MenuItem::with_id(app, "about", format!("InspirasiCam v{version}"), false, None::<&str>)?;
     let record_item = MenuItem::with_id(app, "record", "Mulai Rekam", true, None::<&str>)?;
     let toggle_item = MenuItem::with_id(app, "toggle", "Sembunyikan Overlay", true, None::<&str>)?;
+    // No accelerator: a menu key equivalent would double-fire together with the
+    // globally registered Cmd+Shift+1 hotkey and toggle twice in a row.
+    let fullscreen_item = MenuItem::with_id(app, "fullscreen", "Layar Penuh (⇧⌘1)", true, None::<&str>)?;
 
     let ratio_menu = Submenu::with_id(app, "ratio", "Rasio", true)?;
     let mut ratio_items = Vec::new();
@@ -307,6 +449,7 @@ fn build_tray(app: &tauri::App, ratio: Ratio) -> tauri::Result<AppState> {
             &record_item,
             &PredefinedMenuItem::separator(app)?,
             &toggle_item,
+            &fullscreen_item,
             &ratio_menu,
             &camera_menu,
             &mic_menu,
@@ -350,9 +493,22 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed
+                        && let Some(window) = app.get_webview_window("main")
+                    {
+                        let enter = !window.is_fullscreen().unwrap_or(false);
+                        let _ = toggle_fullscreen(app, &window, enter);
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_devices,
+            exit_fullscreen,
             recording::recording_start,
             recording::recording_append,
             recording::recording_stop,
@@ -375,6 +531,13 @@ pub fn run() {
             let state = build_tray(app, settings.ratio)?;
             *state.settings.lock().unwrap() = settings;
             app.manage(state);
+
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                if let Err(error) = app.global_shortcut().register("CmdOrCtrl+Shift+1") {
+                    eprintln!("global shortcut registration failed: {error}");
+                }
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -12,6 +12,7 @@ Kamera melayang (floating) berbentuk kotak rounded untuk macOS — selalu di ata
 - Tanpa icon Dock — dikontrol dari icon menu bar
 - Rasio, kamera, posisi & ukuran diingat
 - Rekam ke `~/Movies/Rekaman-<timestamp>.mp4` — otomatis di-crop ke rasio aktif, audio dari mikrofon pilihan
+- Mode Layar Penuh: `Cmd+Shift+1` untuk masuk/keluar fullscreen (Space sendiri), atau `Esc` untuk keluar
 - Hover → gradien halus + tombol × untuk keluar (juga Cmd+Q / Cmd+W)
 
 ## Menu Bar
@@ -19,6 +20,7 @@ Kamera melayang (floating) berbentuk kotak rounded untuk macOS — selalu di ata
 |---|---|
 | InspirasiCam vX.Y.Z | Versi app |
 | Sembunyikan / Tampilkan Overlay | Sembunyikan kamera tanpa menutup app (kamera dimatikan) |
+| Layar Penuh (⇧⌘1) | Masuk/keluar fullscreen native (juga Cmd+Shift+1 / Esc) |
 | Mulai Rekam / Berhenti Rekam | Rekam video+audio ke folder Movies |
 | Rasio ▸ | Ganti preset rasio |
 | Kamera ▸ | Pilih kamera |

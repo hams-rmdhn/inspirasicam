@@ -173,3 +173,7 @@ body {
 #frame:hover #resize-handle {
   opacity: 1;
 }
+
+#frame.fullscreen #resize-handle {
+  display: none;
+}
